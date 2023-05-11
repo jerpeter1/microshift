@@ -5,7 +5,8 @@
 #
 set -eo pipefail
 
-BUILD_AND_RUN=true
+BUILD=true
+RUN=true
 INSTALL_BUILD_DEPS=true
 FORCE_FIREWALL=false
 RHEL_SUBSCRIPTION=false
@@ -14,9 +15,10 @@ start=$(date +%s)
 
 function usage() {
     echo "Usage: $(basename "$0") [--no-build] [--no-build-deps] [--force-firewall] <openshift-pull-secret-file>"
-    echo ""
-    echo "  --no-build         Do not build, install and start MicroShift"
+    echo "  --no-run           Do not start MicroShift after building it"
+    echo "  --no-build         Do not build, install and start MicroShift (implies --no-run))"
     echo "  --no-build-deps    Do not install dependencies for building binaries and RPMs (implies --no-build)"
+
     echo "  --force-firewall   Install and configure firewalld regardless of other options"
 
     [ -n "$1" ] && echo -e "\nERROR: $1"
@@ -25,13 +27,19 @@ function usage() {
 
 while [ $# -gt 1 ]; do
     case "$1" in
+    --no-run)
+        RUN=false
+        shift
+        ;;
     --no-build)
-        BUILD_AND_RUN=false
+        BUILD=false
+        RUN=false
         shift
         ;;
     --no-build-deps)
         INSTALL_BUILD_DEPS=false
-        BUILD_AND_RUN=false
+        BUILD=false
+        RUN=FALSE
         shift
         ;;
     --force-firewall)
@@ -123,7 +131,7 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-SIG-NFV
 EOF
 fi
 
-if ${BUILD_AND_RUN}; then
+if ${BUILD}; then
     sudo dnf localinstall -y ~/microshift/_output/rpmbuild/RPMS/*/*.rpm
 fi
 
@@ -146,7 +154,7 @@ else
     rm -f "${OCC_LOC}"
 fi
 
-if ${BUILD_AND_RUN} || ${FORCE_FIREWALL}; then
+if ${BUILD} || ${FORCE_FIREWALL}; then
     # Run MicroShift Executable > Configuring MicroShift > Firewalld
     # https://github.com/openshift/microshift/blob/main/docs/howto_firewall.md#firewalld
     sudo dnf install -y firewalld
@@ -163,7 +171,7 @@ if ${BUILD_AND_RUN} || ${FORCE_FIREWALL}; then
     sudo firewall-cmd --reload 
 fi
 
-if ${BUILD_AND_RUN}; then
+if ${RUN}; then
     # Run MicroShift Executable > Configuring MicroShift
     # https://github.com/openshift/microshift/blob/main/docs/devenv_setup.md#configuring-microshift
     sudo systemctl enable crio 
