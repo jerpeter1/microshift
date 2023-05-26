@@ -79,11 +79,13 @@ function action_create {
     # fail if cd fails
     cd "${REPOROOT}" || (echo "could not cd into repo root(${REPOROOT})" 1>&2 && exit 1)
 
-    if [ ! -d "${VMDISKDIR}" ]; then
-        echo "Creating ${VMDISKDIR} ..."
-        mkdir -p "${VMDISKDIR}"
+    if [[ -z "${LIBVIRT_DEFAULT_URI}" ]]; then
+        if [ ! -d "${VMDISKDIR}" ]; then
+            echo "Creating ${VMDISKDIR} ..."
+            mkdir -p "${VMDISKDIR}"
+        fi
     fi
-
+    
     if ! sudo virsh desc "${VMNAME}" >/dev/null 2>&1; then
         echo "Creating VM ${VMNAME} from ${ISOFILE} ..."
         if ! ./scripts/devenv-builder/create-vm.sh; then

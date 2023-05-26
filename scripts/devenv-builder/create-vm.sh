@@ -24,8 +24,10 @@ DISKSIZE=${6:-${DISKSIZE}}
 SWAPSIZE=${7:-${SWAPSIZE}}
 DATAVOLSIZE=${8:-${DATAVOLSIZE}}
 [ -z "${VMNAME}" ]      && usage "Invalid VM name: '${VMNAME}'"
-[ ! -e "${VMDISKDIR}" ] && usage "VM disk directory '${VMDISKDIR}' is not accessible"
-[ ! -e "${ISOFILE}" ]   && usage "Installation ISO file '${ISOFILE}' is not accessible"
+if [[ -z "${LIBVIRT_DEFAULT_URI}" ]]; then
+    [ ! -e "${VMDISKDIR}" ] && usage "VM disk directory '${VMDISKDIR}' is not accessible"
+    [ ! -e "${ISOFILE}" ]   && usage "Installation ISO file '${ISOFILE}' is not accessible"
+fi
 
 [[ ! "${NCPUS}" =~ ^[0-9]+$ ]]       || [[ "${NCPUS}" -le 0 ]]       && usage "Invalid number of CPUs: '${NCPUS}'"
 [[ ! "${RAMSIZE}" =~ ^[0-9]+$ ]]     || [[ "${RAMSIZE}" -le 0 ]]     && usage "Invalid RAM size: '${RAMSIZE}'"
@@ -52,25 +54,49 @@ if [ "${SWAPSIZE}" -eq 0 ] ; then
     sed -i "s;^part swap;#part swap;" "${KICKSTART_FILE}"
 fi
 
-sudo dnf install -y libvirt virt-manager virt-install virt-viewer libvirt-client qemu-kvm qemu-img sshpass
-if [ "$(systemctl is-active libvirtd.socket)" != "active" ] ; then
-    echo "Restart your host to initialize the virtualization environment"
-    exit 1
-fi
-# Necessary to allow remote connections in the virt-viewer application
-sudo usermod -a -G libvirt "$(whoami)"
+if [[ -z "${LIBVIRT_DEFAULT_URI}" ]]; then
+    sudo dnf install -y libvirt virt-manager virt-install virt-viewer libvirt-client qemu-kvm qemu-img sshpass
+    if [ "$(systemctl is-active libvirtd.socket)" != "active" ] ; then
+        echo "Restart your host to initialize the virtualization environment"
+        exit 1
+    fi
+    # Necessary to allow remote connections in the virt-viewer application
+    sudo usermod -a -G libvirt "$(whoami)"
 
-sudo -b bash -c " \
-cd ${VMDISKDIR} && \
-virt-install \
-    --name ${VMNAME} \
-    --vcpus ${NCPUS} \
-    --memory ${RAMSIZE} \
-    --disk path=./${VMNAME}.qcow2,size=${DISKSIZE} \
-    --network network=default,model=virtio \
-    --events on_reboot=restart \
-    --location ${ISOFILE} \
-    --initrd-inject=${KICKSTART_FILE} \
-    --extra-args \"inst.ks=file:/$(basename "${KICKSTART_FILE}")\" \
-    --wait \
-"
+    sudo -b bash -c " \
+    cd ${VMDISKDIR} && \
+    virt-install \
+        --name ${VMNAME} \
+        --vcpus ${NCPUS} \
+        --memory ${RAMSIZE} \
+        --disk path=./${VMNAME}.qcow2,size=${DISKSIZE} \
+        --network network=default,model=virtio \
+        --events on_reboot=restart \
+        --location ${ISOFILE} \
+        --initrd-inject=${KICKSTART_FILE} \
+        --extra-args \"inst.ks=file:/$(basename )"${KICKSTART_FILE}")\" \
+        --wait \
+    "
+else
+    # start a webserver to serve up the kickstart file
+    sudo systemctl stop firewalld;
+    cd / && python3 -m http.server 8000 &
+    HTTP_SERVER_PID=$!
+    sleep 2
+    
+    virt-install \
+        --name ${VMNAME} \
+        --vcpus ${NCPUS} \
+        --memory ${RAMSIZE} \
+        --disk path=/var/lib/libvirt/images/${VMNAME}.qcow2,size=${DISKSIZE} \
+        --network network=default,model=virtio \
+        --events on_reboot=restart \
+        --location http://www.jerpeter.com/rhel-9.2 \
+        --extra-args "inst.ks=http://${HOSTNAME}:8000${KICKSTART_FILE}" \
+        --wait
+
+    kill "${HTTP_SERVER_PID}"
+
+    sudo systemctl start firewalld;
+fi
+

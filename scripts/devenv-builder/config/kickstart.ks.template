@@ -33,7 +33,6 @@ rootpw --lock
 user   --plaintext --name=microshift --password=microshift
 
 # Minimal package setup
-cdrom
 %packages
 @^minimal-environment
 %end

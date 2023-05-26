@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+# This script will setup the microshift cluster running on localhost to run in multinode mode. If a VM for the worker node does not exist at $WORKER_NODE_HOSTNAME and $LIBVIRT_DEFAULT_URI is set then a VM will be created for the worker node. Otherwise, if we're able to connect to the worker node via SSH then credentials will be created, the worker node will be configured to run kubelet, and the new node will be connected to the microshift cluster.
+
 WORKER_NODE_HOSTNAME=${WORKER_NODE_HOSTNAME:-"worker-node"}
 KUBELET_DIR=${KUBELET_DIR:-"/home/microshift/kubelet"}
 GIT_ROOT=$(git rev-parse --show-toplevel)
@@ -17,25 +19,17 @@ remote() {
   ssh -q -t -t "microshift@${remote_host}" "$(printf "%q " "$@")"
 }
 
-find_vm() {
-  WORKER_NODE_IP=$(getent hosts "${WORKER_NODE_HOSTNAME}" | awk '{print $1}')
-  if [[ -z "${WORKER_NODE_IP}" ]]; then
-    echo "Cannot resolve "${WORKER_NODE_HOSTNAME}" to an IP address. Aborting."
-    exit 1
-  fi
-}
-
 create_vm() {
   if [[ -x "${GIT_ROOT}/scripts/devenv-builder/manage-vm.sh" ]]; then
       echo "Creating VM for ${WORKER_NODE_HOSTNAME}"
       export VMNAME="${WORKER_NODE_HOSTNAME}"
+      export MICROSHIFT_SSH_KEY_FILE="~/.ssh/authorized_keys"
+      sudo dnf -y install libvirt-client virt-install
       "${GIT_ROOT}/scripts/devenv-builder/manage-vm.sh" create
   else
       echo "Cannot find or execute ${GIT_ROOT}/scripts/devenv-builder/manage-vm.sh. Aborting."
       exit 1
   fi
-
-  find_vm "${WORKER_NODE_HOSTNAME}"
 
   if ! ssh-keygen -F "${WORKER_NODE_HOSTNAME}"; then
     ssh-keyscan "${WORKER_NODE_HOSTNAME}" >> ~/.ssh/known_hosts
@@ -47,30 +41,31 @@ create_vm() {
   remote "${WORKER_NODE_HOSTNAME}" ./configure-vm.sh /home/microshift/.pull-secret.json --no-run
 }
 
+
+
 if [[ -z "${WORKER_NODE_HOSTNAME}" ]]; then
     echo "WORKER_NODE_HOSTNAME is not defined. Aborting."
     exit 1
 fi
 
-find_vm "${WORKER_NODE_HOSTNAME}"
-
-if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$WORKER_NODE_IP" exit &> /dev/null; then
-  echo "${WORKER_NODE_IP} is unreachable via SSH."
+if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$WORKER_NODE_HOSTNAME" exit &> /dev/null; then
+  echo "${WORKER_NODE_HOSTNAME} is unreachable via SSH."
   if [[ -z "${LIBVIRT_DEFAULT_URI}" ]]; then
-    echo "Cannot reach ${WORKER_NODE_IP} via SSH and LIBVIRT_DEFAULT_URI is not defined. Aborting."
+    echo "Cannot reach ${WORKER_NODE_HOSTNAME} via SSH and LIBVIRT_DEFAULT_URI is not defined. Aborting."
     exit 1
   fi
-  if [[ -z "${MICROSHIFT_SSH_KEY_FILE}" ]]; then
-    echo "Cannot reach ${WORKER_NODE_IP} via SSH and MICROSHIFT_SSH_KEY_FILE is not defined. Aborting."
-    exit 1
-  fi
-  create_vm "${WORKER_NODE_IP}"
-
+  create_vm "${WORKER_NODE_HOSTNAME}"
 else
-  echo "${WORKER_NODE_IP} is reachable via SSH."
+  echo "${WORKER_NODE_HOSTNAME} is reachable via SSH."
   if ! ssh-keygen -F "${WORKER_NODE_HOSTNAME}"; then
     ssh-keyscan "${WORKER_NODE_HOSTNAME}" >> ~/.ssh/known_hosts
   fi
+fi
+
+WORKER_NODE_IP=$(getent hosts "${WORKER_NODE_HOSTNAME}" | awk '{print $1}')
+if [[ -z "${WORKER_NODE_IP}" ]]; then
+  echo "Cannot resolve "${WORKER_NODE_HOSTNAME}" to an IP address. Aborting."
+  exit 1
 fi
 
 ### ON MASTER NODE
